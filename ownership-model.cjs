@@ -1,0 +1,13 @@
+/* Local blueprint evidence; no raw log lines or paths are retained. */
+const FabricatorOwnership=(()=>{
+ const norm=x=>String(x||'').normalize('NFKC').toLowerCase().replace(/\b(blueprint|crafting|recipe)\b/g,' ').replace(/[^a-z0-9]+/g,' ').trim().replace(/\s+/g,' ');
+ const clean=x=>String(x||'').replace(/^(Mil|Ind|Civ|Sth|Cmp|Com|Comp|Ste|Stl)\/(S?\d{1,2}|Cap|Capital)\/[A-D]\s+/i,'').trim();
+ function match(entry,blueprints){const id=entry.id||entry.wiki?.uuid;if(id){const found=blueprints.filter(b=>b.guid===id);if(found.length===1)return{status:'exact',blueprint:found[0]}}const keys=new Set([entry.name,entry.rawDisplayName,entry.wiki?.outputName].filter(Boolean).map(x=>norm(clean(x))));const matches=blueprints.filter(b=>keys.has(norm(b.productName)));return matches.length===1?{status:'exact',blueprint:matches[0]}:{status:matches.length?'ambiguous':'missing'};}
+ function line(text){const received=text.match(/Received\s+Blueprint:\s*(.+?)(?::\s|:\s*$|$)/i);if(received)return[{name:received[1].trim(),sourceType:'Received Blueprint'}];return [...text.matchAll(/(?:CraftingBlueprintRecord\.)?(BP_CRAFT_[A-Za-z0-9_]+)/g)].map(m=>({name:m[1],sourceType:'Raw BP_CRAFT record'}));}
+ function validate(s){if(!s||s.format!==1||!Array.isArray(s.owned)||!Array.isArray(s.pending)||s.owned.some(x=>!x||typeof x.id!=='string'||typeof x.name!=='string')||s.pending.some(x=>!x||typeof x.name!=='string'))throw Error('Nem támogatott sajátrecept-mentés.');return structuredClone(s)}
+ const empty=()=>({format:1,owned:[],pending:[],updatedAt:null});
+ function merge(state,entries,blueprints){const out=validate(state);for(const entry of entries){if(!entry||typeof entry.name!=='string'||!entry.name.trim())continue;const m=match(entry,blueprints),confirmed=entry.sourceType==='Received Blueprint'||entry.sourceType==='manual';if(confirmed&&m.status==='exact'){const b=m.blueprint;if(!out.owned.some(x=>x.id===b.guid))out.owned.push({id:b.guid,name:b.productName,evidence:entry.sourceType});out.pending=out.pending.filter(x=>norm(x.name)!==norm(entry.name));}else if(!out.pending.some(x=>norm(x.name)===norm(entry.name)))out.pending.push({name:entry.name,reason:confirmed?m.status:'raw-record',sourceType:entry.sourceType||'unknown'});}out.updatedAt=new Date().toISOString();return out;}
+ function filter(parsed,state,omitted=[]){const ids=new Set(state.owned.map(x=>x.id));const removed=new Set(omitted);const allowed=r=>(r.access==='default'||ids.has(r.id))&&!removed.has(r.id);return{...parsed,rows:parsed.rows.filter(allowed),excluded:[...parsed.excluded,...parsed.rows.filter(r=>!allowed(r))]};}
+ return{norm,clean,match,line,validate,empty,merge,filter};
+})();
+if(typeof module!=='undefined')module.exports=FabricatorOwnership;
